@@ -1,0 +1,13 @@
+# MCP Agent Dependencies
+# ======================
+# Pinned versions for reproducibility and educational stability
+
+# HTTP Requests - Used to communicate with Ollama and MCP servers
+requests==2.31.0
+urllib3==2.1.0
+
+# Note: We keep dependencies minimal for educational clarity.
+# In production, you might add:
+# - python-dotenv for .env file handling
+# - pydantic for data validation
+# - structlog for better logging

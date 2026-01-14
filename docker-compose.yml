@@ -73,6 +73,21 @@ services:
     profiles:
       - local-llm
 
+  wizard:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.wizard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    networks:
+      - mcp-net
+    profiles:
+      - wizard
+
 networks:
   mcp-net:
     driver: bridge

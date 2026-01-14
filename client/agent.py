@@ -1,143 +1,202 @@
-import os
-import requests
-import json
+"""
+MCP Agent - The Orchestrator
+============================
+
+This is the MAIN FILE that ties everything together.
+
+Think of it as a conductor of an orchestra:
+- It doesn't play instruments (that's the modules in lib/)
+- It coordinates when each section plays (the agent loop)
+- It ensures everything works in harmony
+
+The Agent Loop (5 Steps):
+1. **Discovery**: Find available tools from MCP servers
+2. **Reasoning**: Send user prompt + tools to LLM
+3. **Decision**: LLM decides to use tools or answer directly
+4. **Execution**: Execute requested tools
+5. **Synthesis**: Send tool results back to LLM for final answer
+
+Each step is handled by a specialized module, keeping this file
+clean and easy to understand.
+
+Learning Points:
+- Orchestration code should be high-level and readable
+- Details are hidden in modules (separation of concerns)
+- This file is the "entry point" - it's what users run
+- Good orchestration makes the system easy to understand and modify
+
+Usage:
+    python agent.py "Your question here"
+
+Example:
+    python agent.py "Read hello.txt and tell me what it says"
+"""
+
 import sys
+from typing import List, Dict, Any
 
-# Configuration
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "https://myollama.my.address.it")
-MODEL_NAME = os.environ.get("MODEL_NAME", "llama3") # Default model
-MCP_FILE_URL = os.environ.get("MCP_FILE_URL", "http://mcp-file:3333")
-MCP_DB_URL = os.environ.get("MCP_DB_URL", "http://mcp-db:3334")
+# Import our modules
+from lib.config import get_config
+from lib.ui import print_step, print_info, print_success, print_llm_thought, print_error, Colors
+from lib.mcp_client import discover_all_tools
+from lib.llm_client import LLMClient
+from lib.tool_router import ToolRouter
+from lib.errors import (
+    MCPError, LLMConnectionError, MCPServerError,
+    ToolExecutionError, handle_error
+)
 
-SERVER_MAP = {
-    "read_file": MCP_FILE_URL,
-    "query_db": MCP_DB_URL
-}
 
-def get_tools_from_server(url):
+def chat(prompt: str):
+    """
+    Main agent function - orchestrates the agent loop.
+
+    This is the heart of the agent. It implements the 5-step loop:
+    Discovery → Reasoning → Decision → Execution → Synthesis
+
+    Args:
+        prompt: The user's question or request
+
+    Learning Point:
+        Notice how clean this function is! All the complex logic is
+        in the modules. This function just orchestrates the flow.
+
+    Example:
+        >>> chat("Who wrote the groceries note?")
+        # Agent discovers tools, queries LLM, executes query_db, returns answer
+    """
+    print(f"{Colors.BOLD}🤖 AGENT STARTING...{Colors.ENDC}")
+    print(f'Goal: "{prompt}"\n')
+
     try:
-        resp = requests.get(f"{url}/tools", timeout=2)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"Warning: Could not fetch tools from {url}: {e}", file=sys.stderr)
-        return []
+        # =================================================================
+        # STEP 1: DISCOVERY & CONTEXT PREPARATION
+        # Gather all capabilities (tools) our agent has access to.
+        # =================================================================
+        print_step(1, "Discovery & Assembly")
 
-def mcp_to_ollama_tool(mcp_tool):
-    """Adapt MCP tool definition to Ollama/OpenAI format."""
-    return {
-        "type": "function",
-        "function": {
-            "name": mcp_tool["name"],
-            "description": mcp_tool["description"],
-            "parameters": mcp_tool["inputSchema"]
-        }
-    }
+        # Discover tools from all MCP servers
+        tools, server_map = discover_all_tools()
 
-def chat(prompt):
-    # 1. Gather tools
-    tools = []
-    file_tools = get_tools_from_server(MCP_FILE_URL)
-    db_tools = get_tools_from_server(MCP_DB_URL)
-    
-    all_mcp_tools = file_tools + db_tools
-    ollama_tools = [mcp_to_ollama_tool(t) for t in all_mcp_tools]
+        if not tools:
+            print_error("No tools available! Cannot proceed.")
+            print_info("Make sure MCP servers are running: docker compose ps")
+            return
 
-    messages = [{"role": "user", "content": prompt}]
-    
-    print(f"🤖 Sending request to Ollama ({OLLAMA_URL}) with {len(ollama_tools)} tools...")
-    
-    # 2. First call to Ollama
-    payload = {
-        "model": MODEL_NAME,
-        "messages": messages,
-        "tools": ollama_tools,
-        "stream": False 
-    }
-    
-    try:
-        # User confirmed valid certificate, enabling verification
-        resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload) 
-        
-        if resp.status_code != 200:
-             print(f"❌ Ollama API Error ({resp.status_code}):")
-             print(resp.text)
-             resp.raise_for_status()
-             
-        response_data = resp.json()
+        # =================================================================
+        # STEP 2: REASONING (The "Brain")
+        # We send the Prompt + Tool Definitions to the LLM.
+        # The LLM decides if it can answer directly or needs tools.
+        # =================================================================
+        print_step(2, "Reasoning (Sending to LLM)")
+
+        # Initialize LLM client
+        llm_client = LLMClient()
+
+        # Create conversation with system prompt
+        messages = llm_client.create_conversation(prompt)
+
+        # Send to LLM
+        try:
+            response_data = llm_client.chat(messages, tools)
+        except ConnectionError as e:
+            raise LLMConnectionError(llm_client.ollama_url, str(e))
+
         message = response_data.get("message", {})
-        
-        # 3. Check for tool calls
-        if message.get("tool_calls"):
-            print("🛠️  Model requested tool execution:")
-            messages.append(message) # Add assistant's response history
-            
-            for tool_call in message["tool_calls"]:
-                func_name = tool_call["function"]["name"]
-                raw_args = tool_call["function"]["arguments"]
-                
-                # Sanitize arguments (fix Ollama hallucination where it sends schema instead of value)
-                args = {}
-                for k, v in raw_args.items():
-                    if isinstance(v, dict) and "value" in v:
-                        print(f"⚠️  Sanitizing argument '{k}': unwrapping value from dict")
-                        args[k] = v["value"]
-                    else:
-                        args[k] = v
 
-                print(f"   -> Executing {func_name} with {json.dumps(args)}")
-                
-                # Execute against appropriate MCP server
-                server_url = SERVER_MAP.get(func_name)
-                if server_url:
-                    tool_resp = requests.post(f"{server_url}/call", json={
-                        "name": func_name,
-                        "arguments": args
-                    })
-                    if tool_resp.status_code == 200:
-                        tool_result = tool_resp.json()
-                        # MCP servers return raw result, typically dict.
-                        # We need to serialize for chat history
-                        content_str = json.dumps(tool_result)
-                    else:
-                        content_str = f"Error: {tool_resp.text}"
-                else:
-                    content_str = "Error: Tool unknown to client routing map."
+        # =================================================================
+        # STEP 3: DECISION EVALUATION
+        # Did the LLM give us text or a request to run tools?
+        # =================================================================
+        print_step(3, "Decision Evaluation")
 
-                print(f"   <- Result: {content_str[:100]}...")
+        # Parse tool calls from LLM response
+        tool_calls, is_direct_answer = llm_client.parse_tool_calls(message)
 
-                # Add tool result to history
-                messages.append({
-                    "role": "tool",
-                    "content": content_str,
-                })
-            
-            # 4. Follow-up call to Ollama with results
-            print("🤖 Sending results back to Ollama...")
-            payload["messages"] = messages
-            
-            resp = requests.post(f"{OLLAMA_URL}/api/chat", json=payload)
-            if resp.status_code != 200:
-                 print(f"❌ Ollama API Error (Follow-up) ({resp.status_code}):")
-                 print(resp.text)
-                 resp.raise_for_status()
+        if tool_calls:
+            # LLM wants to use tools
+            # =============================================================
+            # STEP 4: EXECUTION LOOP
+            # For each tool requested, we run it and capture the output.
+            # =============================================================
+            print_step(4, "Tool Execution")
 
-            final_data = resp.json()
-            print("\n📝 Final Answer:")
-            print(final_data["message"]["content"])
-            
+            # Initialize tool router
+            router = ToolRouter(server_map, timeout=10)
+
+            # Execute all requested tools
+            try:
+                results = router.execute_tools(tool_calls)
+            except ConnectionError as e:
+                raise MCPServerError("MCP Server", "unknown", str(e))
+            except Exception as e:
+                raise ToolExecutionError("unknown", str(e))
+
+            # Format results for LLM
+            tool_result_messages = router.format_tool_results_for_llm(results)
+
+            # =============================================================
+            # STEP 5: SYNTHESIS
+            # We send the Tool Results back to the LLM to get the final answer.
+            # =============================================================
+            print_step(5, "Synthesis (Feeding back results)")
+            print_info("Sending tool outputs back to Ollama...")
+
+            # Add tool call and results to conversation
+            messages = llm_client.add_tool_results(
+                messages,
+                message,
+                tool_result_messages
+            )
+
+            # Get final answer from LLM
+            try:
+                final_data = llm_client.chat(messages, tools)
+            except ConnectionError as e:
+                raise LLMConnectionError(llm_client.ollama_url, str(e))
+
+            final_content = final_data["message"]["content"]
+
+            # =============================================================
+            # STEP 6: FINAL ANSWER
+            # =============================================================
+            print_step(6, "Final Answer")
+            print(f"\n{Colors.BOLD}{final_content}{Colors.ENDC}\n")
+
         else:
-            print("\n📝 Answer:")
-            print(message["content"])
+            # LLM answered directly without tools
+            print_step(6, "Direct Answer")
+            print(f"\n{Colors.BOLD}{message['content']}{Colors.ENDC}\n")
 
-    except Exception as e:
-        print(f"❌ Error communicating with Ollama or Tools: {e}")
+    except MCPError as e:
+        # Our custom errors already have helpful messages
+        print(f"\n{Colors.FAIL}❌ ERROR:{Colors.ENDC}")
+        print(str(e))
         sys.exit(1)
 
+    except Exception as e:
+        # Unexpected errors - provide helpful message
+        print(f"\n{Colors.FAIL}❌ UNEXPECTED ERROR:{Colors.ENDC}")
+        print(handle_error(e))
+        sys.exit(1)
+
+
 if __name__ == "__main__":
+    """
+    Entry point when running the script directly.
+
+    Parses command line arguments and starts the agent.
+
+    Usage:
+        python agent.py "Your prompt here"
+        python agent.py  # Uses default prompt
+    """
     if len(sys.argv) > 1:
+        # User provided a prompt
         prompt = " ".join(sys.argv[1:])
     else:
-        prompt = "Hello! what tools do you have?"
-    
+        # Default didactic prompt
+        prompt = "Hello! Check the database for any notes and tell me what they are about."
+
+    # Run the agent!
     chat(prompt)

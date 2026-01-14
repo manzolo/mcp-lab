@@ -1,6 +1,39 @@
-.PHONY: up down build logs test clean setup agent
+.PHONY: up down build logs test clean setup wizard agent help
 
-# Create .env from .env.dist if not exists
+# Show help
+help:
+	@echo "MCP Lab - Make Commands"
+	@echo ""
+	@echo "Setup:"
+	@echo "  make wizard      - Interactive setup wizard (recommended for beginners)"
+	@echo "  make setup       - Quick setup (copy .env.dist to .env)"
+	@echo "  make up          - Start services with external Ollama"
+	@echo "  make up-local    - Start services with local Ollama container"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test        - Run all tests (servers + agent)"
+	@echo "  make test-servers - Test MCP servers only"
+	@echo "  make test-file   - Test file server only"
+	@echo "  make test-db     - Test database server only"
+	@echo ""
+	@echo "Agent:"
+	@echo "  make agent MSG='your prompt' - Run agent with custom prompt"
+	@echo "  make agent-file  - Run agent with file test"
+	@echo "  make agent-db    - Run agent with database test"
+	@echo ""
+	@echo "Management:"
+	@echo "  make logs        - View service logs"
+	@echo "  make down        - Stop all services"
+	@echo "  make clean       - Stop and remove everything (including volumes)"
+	@echo "  make build       - Rebuild all images"
+	@echo ""
+
+# Interactive setup wizard (recommended for first-time users)
+wizard:
+	@echo "Starting MCP Lab Setup Wizard..."
+	@docker compose run --rm wizard
+
+# Create .env from .env.dist if not exists (quick setup)
 setup:
 	@if [ ! -f .env ]; then \
 		cp .env.dist .env; \
@@ -29,7 +62,7 @@ down:
 
 # Build images
 build:
-	docker compose build --no-cache
+	docker compose --profile agent --profile test build --no-cache
 
 # Follow logs
 logs:
@@ -65,7 +98,7 @@ agent-file:
 
 # Run Agent with DB Test Query
 agent-db:
-	docker compose run --rm mcp-agent "List all notes in the database"
+	docker compose run --rm mcp-agent "List all notes in the database and tell me who wrote them"
 
 # Remove volumes and orphans
 clean:

@@ -33,7 +33,9 @@ async def list_tools():
     return [
         {
             "name": "query_db",
-            "description": "Execute a SQL query against the database",
+            "description": "Execute a SQL query against the database. Available tables:\n"
+                           "CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(50), email VARCHAR(100));\n"
+                           "CREATE TABLE notes (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), title VARCHAR(255), content TEXT, created_at TIMESTAMP);",
             "inputSchema": {
                 "type": "object",
                 "properties": {

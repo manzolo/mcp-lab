@@ -1,0 +1,11 @@
+# MCP File Server Dependencies
+# ============================
+
+# Web Framework - FastAPI for building the HTTP API
+fastapi==0.104.1
+
+# ASGI Server - Uvicorn to run the FastAPI application
+uvicorn==0.24.0
+
+# Data Validation - Pydantic for request/response validation
+pydantic==2.5.0
