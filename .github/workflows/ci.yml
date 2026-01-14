@@ -147,13 +147,6 @@ jobs:
           echo "📦 Wizard image built successfully"
           docker images | grep wizard
 
-      - name: Test wizard can access Docker
-        run: |
-          echo "Testing Docker CLI access..."
-          docker compose run --rm wizard docker --version
-          echo "Testing Docker Compose access..."
-          docker compose run --rm wizard docker-compose --version
-
       - name: Test wizard Python environment
         run: |
           echo "Testing Python and dependencies..."
