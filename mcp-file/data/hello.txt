@@ -1,0 +1,2 @@
+Hello from MCP File Server!
+This file is mounted via Docker volume.
