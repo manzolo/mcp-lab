@@ -58,48 +58,36 @@ Before diving deeper, let's understand **how this actually works**.
 
 ```mermaid
 sequenceDiagram
-    autonumber
+    title MCP Agent Loop
     participant User as 👤 User
-    participant Agent as 🤖 MCP Agent<br/>(Orchestrator)
-    participant Ollama as 🧠 Ollama<br/>(LLM Brain)
-    participant FileServer as 📁 File Server<br/>(MCP Tool)
-    participant DBServer as 🗄️ DB Server<br/>(MCP Tool)
+    participant Agent as 🤖 Agent
+    participant LLM as 🧠 Ollama
+    participant FileServer as 📁 File Tool
+    participant DBServer as 🗄️ DB Tool
 
-    rect rgb(240, 248, 255)
-        Note over Agent,DBServer: STEP 1: Discovery Phase
-        Agent->>+FileServer: GET /tools
-        FileServer-->>-Agent: ["read_file"]
-        Agent->>+DBServer: GET /tools
-        DBServer-->>-Agent: ["query_db"]
-        Note over Agent: ✓ Found 2 tools
-    end
+    %% -- 1. Discovery Phase --
+    note over Agent, DBServer: 1. Discovery
+    Agent->>+FileServer: GET /tools
+    FileServer-->>-Agent: ["read_file"]
+    Agent->>+DBServer: GET /tools
+    DBServer-->>-Agent: ["query_db"]
 
-    rect rgb(255, 250, 240)
-        Note over User,Ollama: STEP 2: Reasoning Phase
-        User->>+Agent: "Who wrote the groceries note?"
-        Agent->>+Ollama: Prompt + Tool Definitions
-        Note right of Ollama: 🤔 Analyzing...<br/>Need to query database
-        Ollama-->>-Agent: tool_call: query_db(sql="SELECT...")
-        Note over Agent: ✓ LLM chose query_db
-    end
+    %% -- 2. Reasoning Phase --
+    note over User, LLM: 2. Reasoning
+    User->>+Agent: "Who wrote the groceries note?"
+    Agent->>+LLM: Prompt + Tools
+    LLM-->>-Agent: Use tool: query_db(...)
 
-    rect rgb(240, 255, 240)
-        Note over Agent,DBServer: STEP 3: Execution Phase
-        Agent->>+DBServer: POST /call<br/>{name: "query_db", args: {...}}
-        Note right of DBServer: 🔄 Executing SQL query
-        DBServer-->>-Agent: [{"username": "alice"}]
-        Note over Agent: ✓ Got tool result
-    end
+    %% -- 3. Execution Phase --
+    note over Agent, DBServer: 3. Execution
+    Agent->>+DBServer: POST /call (query_db)
+    DBServer-->>-Agent: [{"username": "alice"}]
 
-    rect rgb(255, 248, 240)
-        Note over Agent,Ollama: STEP 4: Synthesis Phase
-        Agent->>+Ollama: Tool Result + Context
-        Note right of Ollama: 📝 Generating<br/>natural response
-        Ollama-->>-Agent: "Alice wrote the groceries note."
-        Agent-->>-User: ✨ Final Answer
-    end
-
-    Note over User,DBServer: 🎯 Complete Agent Loop: Discovery → Reasoning → Execution → Synthesis
+    %% -- 4. Synthesis Phase --
+    note over Agent, LLM: 4. Synthesis
+    Agent->>+LLM: Tool Result: "alice"
+    LLM-->>-Agent: "Alice wrote the note."
+    Agent-->>-User: ✨ Final Answer
 ```
 
 ### The Agent Loop (5 Steps)
