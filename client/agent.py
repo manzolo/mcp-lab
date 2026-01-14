@@ -74,8 +74,17 @@ def chat(prompt):
             
             for tool_call in message["tool_calls"]:
                 func_name = tool_call["function"]["name"]
-                args = tool_call["function"]["arguments"]
+                raw_args = tool_call["function"]["arguments"]
                 
+                # Sanitize arguments (fix Ollama hallucination where it sends schema instead of value)
+                args = {}
+                for k, v in raw_args.items():
+                    if isinstance(v, dict) and "value" in v:
+                        print(f"⚠️  Sanitizing argument '{k}': unwrapping value from dict")
+                        args[k] = v["value"]
+                    else:
+                        args[k] = v
+
                 print(f"   -> Executing {func_name} with {json.dumps(args)}")
                 
                 # Execute against appropriate MCP server
