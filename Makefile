@@ -62,7 +62,7 @@ down:
 
 # Build images
 build:
-	docker compose --profile agent --profile test build --no-cache
+	docker compose --profile agent --profile test --profile wizard build --no-cache
 
 # Follow logs
 logs:
