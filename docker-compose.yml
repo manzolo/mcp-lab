@@ -77,6 +77,12 @@ services:
     build:
       context: ./client
       dockerfile: Dockerfile.wizard
+    environment:
+      - OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
+      - MODEL_NAME=${MODEL_NAME:-llama3.2:3b}
+      - POSTGRES_DB=${POSTGRES_DB:-mcp}
+      - POSTGRES_USER=${POSTGRES_USER:-mcp}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-mcp}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/workspace

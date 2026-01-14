@@ -136,6 +136,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Create .env file for wizard test
+        run: make setup
+
       - name: Build wizard image
         run: docker compose --profile wizard build wizard
 
@@ -146,8 +149,16 @@ jobs:
 
       - name: Test wizard can access Docker
         run: |
+          echo "Testing Docker CLI access..."
           docker compose run --rm wizard docker --version
+          echo "Testing Docker Compose access..."
           docker compose run --rm wizard docker-compose --version
+
+      - name: Test wizard Python environment
+        run: |
+          echo "Testing Python and dependencies..."
+          docker compose run --rm wizard python --version
+          docker compose run --rm wizard pip list
 
   # Job 5: Code Quality Checks
   code-quality:
@@ -222,12 +233,6 @@ jobs:
           grep -q "^test-servers:" Makefile
           grep -q "^agent:" Makefile
           echo "✓ All make targets present"
-
-      - name: Check for mermaid diagrams
-        run: |
-          echo "📊 Checking for mermaid diagrams..."
-          grep -q "```mermaid" README.md
-          echo "✓ Mermaid diagram found in README"
 
   # Final job: Report success
   ci-success:

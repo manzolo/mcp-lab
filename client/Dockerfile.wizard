@@ -27,5 +27,5 @@ COPY lib/ ./lib/
 # Make setup_wizard.py executable
 RUN chmod +x setup_wizard.py
 
-# Set the entrypoint to run the wizard
-ENTRYPOINT ["python", "setup_wizard.py"]
+# Use CMD instead of ENTRYPOINT so it can be easily overridden
+CMD ["python", "/app/setup_wizard.py"]
