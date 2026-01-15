@@ -1,0 +1,9 @@
+# MCP Test Runner Dependencies
+# =============================
+
+# MCP Python SDK - For testing MCP servers using official client
+mcp[cli]>=1.0.0
+
+# Async HTTP client (required for streamable-http transport)
+httpx>=0.24.0
+httpx-sse>=0.4.0

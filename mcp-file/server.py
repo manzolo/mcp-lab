@@ -1,61 +1,115 @@
-import os
-from pathlib import Path
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+"""
+MCP File Server - Using Official MCP Python SDK
+================================================
 
-app = FastAPI()
+This server exposes file system operations as MCP tools using
+the official FastMCP framework.
+
+Key Changes from Custom FastAPI Implementation:
+- Uses @mcp.tool() decorator instead of manual /tools and /call endpoints
+- Schema is auto-generated from Python type hints and docstrings
+- Transport layer is handled by the SDK (streamable-http)
+
+Learning Points:
+- FastMCP simplifies server creation with decorators
+- Type hints are used to generate JSON Schema automatically
+- The SDK handles all MCP protocol details
+"""
+
+from pathlib import Path
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+
+# Configure transport security to allow container hostnames
+# This is necessary for Docker container communication
+transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=[
+        "localhost:*",
+        "127.0.0.1:*",
+        "mcp-file:*",      # Docker container name
+        "0.0.0.0:*",
+    ],
+)
+
+# Initialize the MCP server with security settings
+mcp = FastMCP("MCP File Server", transport_security=transport_security)
+
+# Data directory for file access
 DATA_DIR = Path("/data")
 
-class CallRequest(BaseModel):
-    name: str
-    arguments: dict
 
-@app.get("/tools")
-async def list_tools():
-    return [
-        {
-            "name": "read_file",
-            "description": "Read content of a text file from the data directory",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Relative path to file (e.g., 'notes.txt')"
-                    }
-                },
-                "required": ["path"]
-            }
-        }
-    ]
+@mcp.tool()
+def read_file(path: str) -> str:
+    """
+    Read content of a text file from the data directory.
 
-@app.post("/call")
-async def call_tool(request: CallRequest):
-    if request.name != "read_file":
-        raise HTTPException(status_code=404, detail="Tool not found")
-    
-    path_str = request.arguments.get("path")
-    if not path_str:
-        raise HTTPException(status_code=400, detail="Missing path argument")
+    This tool provides secure file reading with path traversal protection.
+    All paths are relative to the /data directory.
 
-    # Prevent path traversal
-    try:
-        requested_path = (DATA_DIR / path_str).resolve()
-        if not requested_path.is_relative_to(DATA_DIR):
-             raise HTTPException(status_code=403, detail="Access denied: Path traversal attempt")
-        
-        if not requested_path.exists():
-             raise HTTPException(status_code=404, detail="File not found")
-             
-        if not requested_path.is_file():
-             raise HTTPException(status_code=400, detail="Path is not a file")
+    Args:
+        path: Relative path to file (e.g., 'notes.txt', 'subdir/file.txt')
 
-        return {"content": requested_path.read_text(encoding="utf-8")}
+    Returns:
+        The content of the file as a string
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    Raises:
+        ValueError: If path attempts directory traversal
+        FileNotFoundError: If file doesn't exist
+    """
+    # Resolve the full path
+    requested_path = (DATA_DIR / path).resolve()
+
+    # Security: Prevent path traversal attacks
+    if not requested_path.is_relative_to(DATA_DIR):
+        raise ValueError("Access denied: Path traversal attempt")
+
+    # Check file exists
+    if not requested_path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+
+    # Check it's actually a file
+    if not requested_path.is_file():
+        raise ValueError(f"Path is not a file: {path}")
+
+    # Read and return content
+    return requested_path.read_text(encoding="utf-8")
+
+
+@mcp.tool()
+def list_files(directory: str = "") -> list[str]:
+    """
+    List files in the data directory or a subdirectory.
+
+    Args:
+        directory: Relative path to directory (empty string for root /data)
+
+    Returns:
+        List of file and directory names in the specified directory
+    """
+    target_dir = (DATA_DIR / directory).resolve()
+
+    # Security: Prevent path traversal
+    if not target_dir.is_relative_to(DATA_DIR):
+        raise ValueError("Access denied: Path traversal attempt")
+
+    if not target_dir.exists():
+        raise FileNotFoundError(f"Directory not found: {directory}")
+
+    if not target_dir.is_dir():
+        raise ValueError(f"Path is not a directory: {directory}")
+
+    # List directory contents
+    return [item.name for item in target_dir.iterdir()]
+
 
 if __name__ == "__main__":
     import uvicorn
+
     print("Starting MCP File Server on port 3333...")
+
+    # Get the ASGI app from FastMCP and run with uvicorn
+    # This provides control over host and port
+    app = mcp.streamable_http_app()
+
     uvicorn.run(app, host="0.0.0.0", port=3333)

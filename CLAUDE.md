@@ -22,17 +22,19 @@ The system consists of three main components orchestrated by Docker Compose:
 
 Understanding the flow is critical to working with this codebase:
 
-1. **Discovery**: Agent fetches available tools from MCP servers via `GET /tools`
+1. **Discovery**: Agent fetches available tools from MCP servers via SDK's `list_tools()`
 2. **Reasoning**: Agent sends user prompt + tool definitions to Ollama
 3. **Decision**: Ollama responds with either text or structured tool call requests
-4. **Execution**: Agent routes tool calls to appropriate MCP server via `POST /call`
+4. **Execution**: Agent routes tool calls to appropriate MCP server via SDK's `call_tool()`
 5. **Synthesis**: Agent feeds tool results back to Ollama for final response
 
 ### MCP Protocol
 
-All MCP servers implement two endpoints:
-- `GET /tools`: Returns JSON array of tool definitions with `name`, `description`, and `inputSchema`
-- `POST /call`: Accepts `{name: string, arguments: dict}` and returns tool execution results
+This project uses the **official MCP Python SDK** with streamable-http transport:
+- Servers use `FastMCP` with `@mcp.tool()` decorators
+- Client uses `ClientSession` with `streamablehttp_client`
+- Communication via JSON-RPC protocol at `/mcp` endpoint
+- Transport security configured to allow Docker container hostnames
 
 ## Common Commands
 
@@ -133,12 +135,13 @@ Console UI with ANSI color codes:
 - `print_step()`, `print_info()`, `print_success()`, etc.: Styled output functions
 - Separates presentation from business logic
 
-#### `client/lib/mcp_client.py` (~270 lines)
-MCP protocol implementation:
-- `MCPClient` class: Communicates with MCP servers
-- `get_tools()`: Discovery phase - fetches tools from servers
+#### `client/lib/mcp_client.py` (~310 lines)
+MCP protocol implementation using official SDK:
+- `MCPClient` class: Uses `ClientSession` with `streamablehttp_client`
+- `get_tools()`: Async discovery via SDK's `list_tools()` method
+- `call_tool()`: Async tool execution via SDK's `call_tool()` method
 - `mcp_to_ollama_tool()`: Converts MCP format to Ollama format
-- `discover_all_tools()`: Convenience function to query all servers
+- `discover_all_tools()`: Sync wrapper using `asyncio.run()`
 - Implements caching for efficiency
 
 #### `client/lib/llm_client.py` (~290 lines)
@@ -150,13 +153,13 @@ Ollama/LLM communication:
 - `create_conversation()`: Initializes message history
 - `add_tool_results()`: Appends tool results to conversation
 
-#### `client/lib/tool_router.py` (~260 lines)
-Tool routing and execution:
-- `ToolRouter` class: Routes tool calls to appropriate servers
-- `execute_tool()`: Executes a single tool with error handling
+#### `client/lib/tool_router.py` (~300 lines)
+Tool routing and execution using official SDK:
+- `ToolRouter` class: Routes tool calls to appropriate servers via `MCPClient`
+- `execute_tool()`: Sync wrapper around async `_execute_tool_async()`
 - `execute_tools()`: Executes multiple tools sequentially
 - `format_tool_results_for_llm()`: Formats results for LLM consumption
-- Implements retry logic and timeout handling
+- Uses `MCPClient.call_tool()` for SDK-based execution
 
 #### `client/lib/sanitizers.py` (~240 lines)
 Input sanitization and LLM quirk fixes:
@@ -176,11 +179,21 @@ Educational error messages:
 - `handle_error()`: Converts any exception to user-friendly message
 - Each error includes: what happened, why, and how to fix
 
-### `mcp-file/server.py`
-FastAPI server exposing file system operations. Implements path traversal protection using `Path.is_relative_to()` to ensure all file access stays within `/data` directory.
+### `mcp-file/server.py` (~115 lines)
+FastMCP server exposing file system operations using official MCP Python SDK:
+- Uses `@mcp.tool()` decorator for tool definition
+- `read_file()`: Reads files with path traversal protection
+- `list_files()`: Lists directory contents
+- `TransportSecuritySettings`: Configures allowed hosts for Docker
+- Runs with uvicorn and `streamable_http_app()`
 
-### `mcp-db/server.py`
-FastAPI server exposing database query capabilities. Uses `psycopg2.extras.RealDictCursor` to return results as dictionaries. Executes raw SQL with proper error handling and transaction management.
+### `mcp-db/server.py` (~165 lines)
+FastMCP server exposing database query capabilities using official MCP Python SDK:
+- Uses `@mcp.tool()` decorator for tool definition
+- `query_db()`: Executes SQL queries with `RealDictCursor`
+- `list_tables()`: Lists available database tables
+- `describe_table()`: Returns table schema
+- `TransportSecuritySettings`: Configures allowed hosts for Docker
 
 ### `mcp-db/init.sql`
 Database schema and seed data:
@@ -207,8 +220,33 @@ Configuration is managed via `.env` file (created from `.env.dist`):
 To extend the system with a new tool:
 
 1. Create a new directory (e.g., `mcp-weather/`)
-2. Implement FastAPI server with `GET /tools` and `POST /call` endpoints
-3. Create `requirements.txt` with pinned dependencies
+2. Create `server.py` using FastMCP:
+```python
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+
+transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=["localhost:*", "127.0.0.1:*", "mcp-weather:*", "0.0.0.0:*"],
+)
+
+mcp = FastMCP("Weather Server", transport_security=transport_security)
+
+@mcp.tool()
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
+    return {"temperature": 72, "conditions": "sunny"}
+
+if __name__ == "__main__":
+    import uvicorn
+    app = mcp.streamable_http_app()
+    uvicorn.run(app, host="0.0.0.0", port=3335)
+```
+3. Create `requirements.txt`:
+```
+mcp[cli]>=1.0.0
+uvicorn>=0.24.0
+```
 4. Create `Dockerfile` (follow pattern from mcp-file or mcp-db)
 5. Add service to `docker-compose.yml` with appropriate port and network
 6. Update `client/lib/config.py`:
@@ -257,15 +295,15 @@ mcp-lab/
 │       └── errors.py         # Error handling (320 lines)
 │
 ├── mcp-file/                  # File Tool Server
-│   ├── server.py             # FastAPI server (~60 lines)
+│   ├── server.py             # FastMCP server (~115 lines)
 │   ├── data/                 # Accessible files
-│   ├── requirements.txt      # Pinned dependencies
+│   ├── requirements.txt      # MCP SDK + uvicorn
 │   └── Dockerfile
 │
 ├── mcp-db/                    # Database Tool Server
-│   ├── server.py             # FastAPI server (~87 lines)
+│   ├── server.py             # FastMCP server (~165 lines)
 │   ├── init.sql              # Schema & seed data
-│   ├── requirements.txt      # Pinned dependencies
+│   ├── requirements.txt      # MCP SDK + psycopg2
 │   └── Dockerfile
 │
 ├── tests/                     # Integration tests

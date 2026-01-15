@@ -160,40 +160,35 @@ This lab consists of **3 main parts**:
 
 ### The MCP Protocol
 
-MCP is incredibly simple - just 2 HTTP endpoints:
+This project uses the **official MCP Python SDK** with the `FastMCP` framework:
 
-**GET /tools** - List available tools
-```json
-[
-  {
-    "name": "read_file",
-    "description": "Read a text file",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "path": {"type": "string"}
-      },
-      "required": ["path"]
-    }
-  }
-]
+**Server Definition** - Using `@mcp.tool()` decorator:
+```python
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("File Server")
+
+@mcp.tool()
+def read_file(path: str) -> str:
+    """Read a text file from the data directory."""
+    return Path(f"/data/{path}").read_text()
 ```
 
-**POST /call** - Execute a tool
-```json
-// Request
-{
-  "name": "read_file",
-  "arguments": {"path": "hello.txt"}
-}
+**Client Usage** - Using `ClientSession`:
+```python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
-// Response
-{
-  "content": "Hello World!"
-}
+async with streamablehttp_client(url) as (read, write, _):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        result = await session.call_tool("read_file", {"path": "hello.txt"})
 ```
 
-**That's it!** This simplicity makes it easy to create new tools and integrate them with agents.
+**Transport**: Streamable HTTP via `/mcp` endpoint (JSON-RPC protocol)
+
+**That's it!** The SDK handles all protocol details, making it easy to create new tools.
 
 ---
 
@@ -298,12 +293,12 @@ mcp-lab/
 │       └── errors.py         # Educational error messages
 │
 ├── mcp-file/                  # File Tool Server
-│   ├── server.py             # FastAPI server
+│   ├── server.py             # FastMCP server (official SDK)
 │   ├── data/                 # Accessible files
 │   └── requirements.txt
 │
 ├── mcp-db/                    # Database Tool Server
-│   ├── server.py             # FastAPI server
+│   ├── server.py             # FastMCP server (official SDK)
 │   ├── init.sql              # Schema & seed data
 │   └── requirements.txt
 │
@@ -363,30 +358,36 @@ Want to add a weather tool? Here's how:
 
 **1. Create the server** (`mcp-weather/server.py`):
 ```python
-from fastapi import FastAPI
-app = FastAPI()
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
-@app.get("/tools")
-def list_tools():
-    return [{
-        "name": "get_weather",
-        "description": "Get current weather",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "city": {"type": "string"}
-            },
-            "required": ["city"]
-        }
-    }]
+# Allow Docker container hostname
+transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=["localhost:*", "127.0.0.1:*", "mcp-weather:*", "0.0.0.0:*"],
+)
 
-@app.post("/call")
-def call_tool(request: dict):
+mcp = FastMCP("Weather Server", transport_security=transport_security)
+
+@mcp.tool()
+def get_weather(city: str) -> dict:
+    """Get current weather for a city."""
     # Implement weather fetching logic
     return {"temperature": 72, "conditions": "sunny"}
+
+if __name__ == "__main__":
+    import uvicorn
+    app = mcp.streamable_http_app()
+    uvicorn.run(app, host="0.0.0.0", port=3335)
 ```
 
-**2. Add to `docker-compose.yml`**:
+**2. Create `requirements.txt`**:
+```
+mcp[cli]>=1.0.0
+uvicorn>=0.24.0
+```
+
+**3. Add to `docker-compose.yml`**:
 ```yaml
 mcp-weather:
   build: ./mcp-weather
@@ -396,13 +397,13 @@ mcp-weather:
     - mcp-net
 ```
 
-**3. Register in agent** (`client/lib/config.py`):
+**4. Register in agent** (`client/lib/config.py`):
 ```python
 self.mcp_weather_url = os.environ.get("MCP_WEATHER_URL", "http://mcp-weather:3335")
 self.server_map["get_weather"] = self.mcp_weather_url
 ```
 
-**4. Test it**:
+**5. Test it**:
 ```bash
 make agent MSG="What's the weather in London?"
 ```
@@ -583,6 +584,7 @@ MIT License - Free for learning and commercial use
 
 Built with ❤️ for learners to demonstrate:
 - **Model Context Protocol (MCP)** by Anthropic
+- **Official MCP Python SDK** for servers and clients
 - **AI Agent Architecture** patterns
 - **Microservices with Docker**
 - **Tool Calling / Function Calling**

@@ -2,12 +2,14 @@
 # ======================
 # Pinned versions for reproducibility and educational stability
 
-# HTTP Requests - Used to communicate with Ollama and MCP servers
+# MCP Python SDK - Official Model Context Protocol implementation
+# Provides client session management and transport protocols
+mcp[cli]>=1.0.0
+
+# HTTP Requests - Used to communicate with Ollama LLM
 requests==2.31.0
 urllib3==2.1.0
 
-# Note: We keep dependencies minimal for educational clarity.
-# In production, you might add:
-# - python-dotenv for .env file handling
-# - pydantic for data validation
-# - structlog for better logging
+# Async HTTP client for MCP SDK (required for streamable-http transport)
+httpx>=0.24.0
+httpx-sse>=0.4.0

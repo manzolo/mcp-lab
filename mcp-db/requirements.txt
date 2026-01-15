@@ -1,14 +1,12 @@
 # MCP Database Server Dependencies
 # =================================
 
-# Web Framework - FastAPI for building the HTTP API
-fastapi==0.104.1
+# MCP Python SDK - Official Model Context Protocol implementation
+# Provides FastMCP server framework with tool decorators
+mcp[cli]>=1.0.0
 
-# ASGI Server - Uvicorn to run the FastAPI application
-uvicorn==0.24.0
-
-# Data Validation - Pydantic for request/response validation
-pydantic==2.5.0
+# ASGI Server - Uvicorn to run the FastMCP application
+uvicorn>=0.24.0
 
 # PostgreSQL Driver - psycopg2 to connect to PostgreSQL
 psycopg2-binary==2.9.9

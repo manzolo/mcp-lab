@@ -1,86 +1,165 @@
+"""
+MCP Database Server - Using Official MCP Python SDK
+====================================================
+
+This server exposes database query capabilities as MCP tools using
+the official FastMCP framework.
+
+Key Changes from Custom FastAPI Implementation:
+- Uses @mcp.tool() decorator instead of manual /tools and /call endpoints
+- Schema is auto-generated from Python type hints and docstrings
+- Transport layer is handled by the SDK (streamable-http)
+
+Learning Points:
+- FastMCP simplifies server creation with decorators
+- Type hints are used to generate JSON Schema automatically
+- The SDK handles all MCP protocol details
+"""
+
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
-app = FastAPI()
+# Configure transport security to allow container hostnames
+# This is necessary for Docker container communication
+transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=[
+        "localhost:*",
+        "127.0.0.1:*",
+        "mcp-db:*",        # Docker container name
+        "0.0.0.0:*",
+    ],
+)
+
+# Initialize the MCP server with security settings
+mcp = FastMCP("MCP Database Server", transport_security=transport_security)
 
 # Database connection parameters from environment
-DB_HOST = os.environ.get("DB_HOST", "postgres")
-DB_NAME = os.environ.get("DB_NAME", "mcp")
-DB_USER = os.environ.get("DB_USER", "mcp")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "mcp")
+DB_CONFIG = {
+    "host": os.environ.get("DB_HOST", "postgres"),
+    "database": os.environ.get("DB_NAME", "mcp"),
+    "user": os.environ.get("DB_USER", "mcp"),
+    "password": os.environ.get("DB_PASSWORD", "mcp"),
+}
 
-class CallRequest(BaseModel):
-    name: str
-    arguments: dict
 
 def get_db_connection():
-    try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
-        )
-        return conn
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database connection error: {str(e)}")
+    """Create and return a database connection."""
+    return psycopg2.connect(**DB_CONFIG)
 
-@app.get("/tools")
-async def list_tools():
-    return [
-        {
-            "name": "query_db",
-            "description": "Execute a SQL query against the database. Available tables:\n"
-                           "CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(50), email VARCHAR(100));\n"
-                           "CREATE TABLE notes (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id), title VARCHAR(255), content TEXT, created_at TIMESTAMP);",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "sql": {
-                        "type": "string",
-                        "description": "SQL query to execute"
-                    }
-                },
-                "required": ["sql"]
-            }
-        }
-    ]
 
-@app.post("/call")
-async def call_tool(request: CallRequest):
-    if request.name != "query_db":
-        raise HTTPException(status_code=404, detail="Tool not found")
-    
-    sql = request.arguments.get("sql")
-    if not sql:
-        raise HTTPException(status_code=400, detail="Missing sql argument")
+@mcp.tool()
+def query_db(sql: str) -> list[dict]:
+    """
+    Execute a SQL query against the database.
 
+    Available tables:
+    - users (id SERIAL PRIMARY KEY, username VARCHAR(50), email VARCHAR(100))
+    - notes (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id),
+             title VARCHAR(255), content TEXT, created_at TIMESTAMP)
+
+    Args:
+        sql: SQL query to execute (SELECT, INSERT, UPDATE, DELETE)
+
+    Returns:
+        For SELECT queries: List of dictionaries with query results
+        For other queries: Status and rows affected
+
+    Examples:
+        - SELECT * FROM users
+        - SELECT n.*, u.username FROM notes n JOIN users u ON n.user_id = u.id
+        - SELECT * FROM notes WHERE title ILIKE '%shopping%'
+    """
     conn = get_db_connection()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute(sql)
-        
-        # Check if query returns rows
+
+        # Check if query returns rows (SELECT) or is a mutation (INSERT/UPDATE/DELETE)
         if cur.description:
             rows = cur.fetchall()
             result = [dict(row) for row in rows]
         else:
             conn.commit()
             result = [{"status": "success", "rows_affected": cur.rowcount}]
-            
+
         cur.close()
-        conn.close()
         return result
 
     except Exception as e:
         conn.rollback()
+        raise ValueError(f"Query error: {str(e)}")
+
+    finally:
         conn.close()
-        raise HTTPException(status_code=500, detail=f"Query error: {str(e)}")
+
+
+@mcp.tool()
+def list_tables() -> list[str]:
+    """
+    List all tables in the database.
+
+    Returns:
+        List of table names in the public schema
+    """
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT tablename FROM pg_tables
+            WHERE schemaname = 'public'
+            ORDER BY tablename
+        """)
+        tables = [row[0] for row in cur.fetchall()]
+        cur.close()
+        return tables
+
+    finally:
+        conn.close()
+
+
+@mcp.tool()
+def describe_table(table_name: str) -> list[dict]:
+    """
+    Get the schema/columns of a specific table.
+
+    Args:
+        table_name: Name of the table to describe
+
+    Returns:
+        List of column definitions with name, type, and nullable info
+    """
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT column_name, data_type, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            ORDER BY ordinal_position
+        """, (table_name,))
+        columns = [dict(row) for row in cur.fetchall()]
+        cur.close()
+
+        if not columns:
+            raise ValueError(f"Table '{table_name}' not found")
+
+        return columns
+
+    finally:
+        conn.close()
+
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"Starting MCP DB Server on port 3334... DB_HOST={DB_HOST}")
+
+    print(f"Starting MCP DB Server on port 3334... DB_HOST={DB_CONFIG['host']}")
+
+    # Get the ASGI app from FastMCP and run with uvicorn
+    # This provides control over host and port
+    app = mcp.streamable_http_app()
+
     uvicorn.run(app, host="0.0.0.0", port=3334)
