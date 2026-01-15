@@ -89,83 +89,42 @@ Alice wrote the note about groceries.
 
 ## MCP Protocol Deep Dive
 
-### Exercise 2: Manually Call MCP Endpoints
+### Exercise 2: Observe the Protocol via Logs
 
-**Goal**: Understand the MCP protocol by calling endpoints directly. FastMCP uses a JSON-RPC 2.0 interface over HTTP at the `/mcp` endpoint.
+**Goal**: Understand the MCP protocol by observing the communication between the agent and servers.
+
+With the upgrade to **FastMCP**, our servers now use the full Model Context Protocol, which involves session management (initialization, handshakes, and session IDs). Therefore, manual testing is best performed using the built-in test runner or the agent itself.
 
 #### Part A: Discover Tools
 
+Instead of raw `curl`, use the provided test runner which handles the MCP handshake correctly:
+
 ```bash
-# Call the file server's /mcp endpoint to list tools
-curl -X POST http://localhost:3333/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}' | jq
+# Test the file server tools
+make test-file
+
+# Test the database server tools
+make test-db
 ```
 
-<details>
-<summary>Click to see expected output</summary>
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "tools": [
-      {
-        "name": "read_file",
-        "description": "Read content of a text file from the data directory...",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            }
-          },
-          "required": ["path"]
-        }
-      }
-    ]
-  }
-}
-```
-</details>
+**What to observe in the output**:
+- `Initializing session...`: The client and server agree on protocol versions.
+- `Fetching tools...`: The client requests the "menu" of available tools.
+- `Found X tools`: The server returns the JSON Schema definitions.
 
 #### Part B: Execute a Tool
 
-```bash
-# Call the /mcp endpoint to execute read_file
-curl -X POST http://localhost:3333/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/call",
-    "params": {
-      "name": "read_file",
-      "arguments": {"path": "hello.txt"}
-    }
-  }' | jq
-```
-
-**Challenge**: Try calling the database tool to list all tables!
-
-<details>
-<summary>Solution</summary>
+You can also see the protocol in action by running the agent with a specific query and checking the logs:
 
 ```bash
-curl -X POST http://localhost:3334/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": {
-      "name": "list_tables",
-      "arguments": {}
-    }
-  }' | jq
+# 1. Run a query
+make agent-file
+
+# 2. In a separate terminal, watch the server logs
+make logs
 ```
-</details>
+
+**Challenge**: Look at the logs for `mcp-file` and try to identify the JSON-RPC requests being processed!
 
 ---
 
