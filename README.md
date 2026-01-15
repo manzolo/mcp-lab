@@ -160,11 +160,11 @@ This lab consists of **3 main parts**:
 
 ### The MCP Protocol
 
-This project uses the **official MCP Python SDK** with the `FastMCP` framework:
+This project uses the **FastMCP** framework - the fast, Pythonic way to build MCP servers:
 
 **Server Definition** - Using `@mcp.tool()` decorator:
 ```python
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 mcp = FastMCP("File Server")
 
@@ -172,6 +172,9 @@ mcp = FastMCP("File Server")
 def read_file(path: str) -> str:
     """Read a text file from the data directory."""
     return Path(f"/data/{path}").read_text()
+
+if __name__ == "__main__":
+    mcp.run(transport="http", host="0.0.0.0", port=3333)
 ```
 
 **Client Usage** - Using `ClientSession`:
@@ -358,16 +361,9 @@ Want to add a weather tool? Here's how:
 
 **1. Create the server** (`mcp-weather/server.py`):
 ```python
-from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
 
-# Allow Docker container hostname
-transport_security = TransportSecuritySettings(
-    enable_dns_rebinding_protection=True,
-    allowed_hosts=["localhost:*", "127.0.0.1:*", "mcp-weather:*", "0.0.0.0:*"],
-)
-
-mcp = FastMCP("Weather Server", transport_security=transport_security)
+mcp = FastMCP("Weather Server")
 
 @mcp.tool()
 def get_weather(city: str) -> dict:
@@ -376,15 +372,12 @@ def get_weather(city: str) -> dict:
     return {"temperature": 72, "conditions": "sunny"}
 
 if __name__ == "__main__":
-    import uvicorn
-    app = mcp.streamable_http_app()
-    uvicorn.run(app, host="0.0.0.0", port=3335)
+    mcp.run(transport="http", host="0.0.0.0", port=3335)
 ```
 
 **2. Create `requirements.txt`**:
 ```
-mcp[cli]>=1.0.0
-uvicorn>=0.24.0
+fastmcp>=2.0.0
 ```
 
 **3. Add to `docker-compose.yml`**:
@@ -584,7 +577,7 @@ MIT License - Free for learning and commercial use
 
 Built with ❤️ for learners to demonstrate:
 - **Model Context Protocol (MCP)** by Anthropic
-- **Official MCP Python SDK** for servers and clients
+- **FastMCP** - the fast, Pythonic way to build MCP servers
 - **AI Agent Architecture** patterns
 - **Microservices with Docker**
 - **Tool Calling / Function Calling**

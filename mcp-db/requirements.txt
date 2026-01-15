@@ -1,12 +1,9 @@
 # MCP Database Server Dependencies
 # =================================
 
-# MCP Python SDK - Official Model Context Protocol implementation
-# Provides FastMCP server framework with tool decorators
-mcp[cli]>=1.0.0
-
-# ASGI Server - Uvicorn to run the FastMCP application
-uvicorn>=0.24.0
+# FastMCP - The fast, Pythonic way to build MCP servers
+# Standalone package with full HTTP transport support
+fastmcp>=2.0.0
 
 # PostgreSQL Driver - psycopg2 to connect to PostgreSQL
 psycopg2-binary==2.9.9

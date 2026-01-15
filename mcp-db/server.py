@@ -1,41 +1,29 @@
 """
-MCP Database Server - Using Official MCP Python SDK
-====================================================
+MCP Database Server - Using FastMCP (Standalone Package)
+=========================================================
 
 This server exposes database query capabilities as MCP tools using
-the official FastMCP framework.
+the FastMCP framework - the fast, Pythonic way to build MCP servers.
 
-Key Changes from Custom FastAPI Implementation:
-- Uses @mcp.tool() decorator instead of manual /tools and /call endpoints
-- Schema is auto-generated from Python type hints and docstrings
-- Transport layer is handled by the SDK (streamable-http)
+Key Features:
+- @mcp.tool() decorator for tool definition
+- Automatic JSON Schema generation from type hints
+- Built-in HTTP transport with host/port configuration
+- Clean, minimal API
 
 Learning Points:
 - FastMCP simplifies server creation with decorators
 - Type hints are used to generate JSON Schema automatically
-- The SDK handles all MCP protocol details
+- The run() method handles all transport details
 """
 
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
 
-# Configure transport security to allow container hostnames
-# This is necessary for Docker container communication
-transport_security = TransportSecuritySettings(
-    enable_dns_rebinding_protection=True,
-    allowed_hosts=[
-        "localhost:*",
-        "127.0.0.1:*",
-        "mcp-db:*",        # Docker container name
-        "0.0.0.0:*",
-    ],
-)
-
-# Initialize the MCP server with security settings
-mcp = FastMCP("MCP Database Server", transport_security=transport_security)
+# Initialize the MCP server
+mcp = FastMCP("MCP Database Server")
 
 # Database connection parameters from environment
 DB_CONFIG = {
@@ -154,12 +142,6 @@ def describe_table(table_name: str) -> list[dict]:
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     print(f"Starting MCP DB Server on port 3334... DB_HOST={DB_CONFIG['host']}")
-
-    # Get the ASGI app from FastMCP and run with uvicorn
-    # This provides control over host and port
-    app = mcp.streamable_http_app()
-
-    uvicorn.run(app, host="0.0.0.0", port=3334)
+    # Run with HTTP transport - clean API!
+    mcp.run(transport="http", host="0.0.0.0", port=3334)

@@ -179,21 +179,20 @@ Educational error messages:
 - `handle_error()`: Converts any exception to user-friendly message
 - Each error includes: what happened, why, and how to fix
 
-### `mcp-file/server.py` (~115 lines)
-FastMCP server exposing file system operations using official MCP Python SDK:
+### `mcp-file/server.py` (~95 lines)
+FastMCP server exposing file system operations using standalone FastMCP package:
 - Uses `@mcp.tool()` decorator for tool definition
 - `read_file()`: Reads files with path traversal protection
 - `list_files()`: Lists directory contents
-- `TransportSecuritySettings`: Configures allowed hosts for Docker
-- Runs with uvicorn and `streamable_http_app()`
+- Clean `mcp.run(transport="http", host="...", port="...")` API
 
-### `mcp-db/server.py` (~165 lines)
-FastMCP server exposing database query capabilities using official MCP Python SDK:
+### `mcp-db/server.py` (~145 lines)
+FastMCP server exposing database query capabilities using standalone FastMCP package:
 - Uses `@mcp.tool()` decorator for tool definition
 - `query_db()`: Executes SQL queries with `RealDictCursor`
 - `list_tables()`: Lists available database tables
 - `describe_table()`: Returns table schema
-- `TransportSecuritySettings`: Configures allowed hosts for Docker
+- Clean `mcp.run(transport="http", host="...", port="...")` API
 
 ### `mcp-db/init.sql`
 Database schema and seed data:
@@ -222,15 +221,9 @@ To extend the system with a new tool:
 1. Create a new directory (e.g., `mcp-weather/`)
 2. Create `server.py` using FastMCP:
 ```python
-from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
 
-transport_security = TransportSecuritySettings(
-    enable_dns_rebinding_protection=True,
-    allowed_hosts=["localhost:*", "127.0.0.1:*", "mcp-weather:*", "0.0.0.0:*"],
-)
-
-mcp = FastMCP("Weather Server", transport_security=transport_security)
+mcp = FastMCP("Weather Server")
 
 @mcp.tool()
 def get_weather(city: str) -> dict:
@@ -238,14 +231,11 @@ def get_weather(city: str) -> dict:
     return {"temperature": 72, "conditions": "sunny"}
 
 if __name__ == "__main__":
-    import uvicorn
-    app = mcp.streamable_http_app()
-    uvicorn.run(app, host="0.0.0.0", port=3335)
+    mcp.run(transport="http", host="0.0.0.0", port=3335)
 ```
 3. Create `requirements.txt`:
 ```
-mcp[cli]>=1.0.0
-uvicorn>=0.24.0
+fastmcp>=2.0.0
 ```
 4. Create `Dockerfile` (follow pattern from mcp-file or mcp-db)
 5. Add service to `docker-compose.yml` with appropriate port and network
