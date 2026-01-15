@@ -91,58 +91,79 @@ Alice wrote the note about groceries.
 
 ### Exercise 2: Manually Call MCP Endpoints
 
-**Goal**: Understand the MCP protocol by calling endpoints directly.
+**Goal**: Understand the MCP protocol by calling endpoints directly. FastMCP uses a JSON-RPC 2.0 interface over HTTP at the `/mcp` endpoint.
 
 #### Part A: Discover Tools
 
 ```bash
-# Call the file server's /tools endpoint
-curl http://localhost:3333/tools | jq
-
-# Expected output: List of tools with schemas
+# Call the file server's /mcp endpoint to list tools
+curl -X POST http://localhost:3333/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}' | jq
 ```
 
 <details>
 <summary>Click to see expected output</summary>
 
 ```json
-[
-  {
-    "name": "read_file",
-    "description": "Read content of a text file from the data directory",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string",
-          "description": "Relative path to file"
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "read_file",
+        "description": "Read content of a text file from the data directory...",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": ["path"]
         }
-      },
-      "required": ["path"]
-    }
+      }
+    ]
   }
-]
+}
 ```
 </details>
 
 #### Part B: Execute a Tool
 
 ```bash
-# Call the /call endpoint to execute read_file
-curl -X POST http://localhost:3333/call \
+# Call the /mcp endpoint to execute read_file
+curl -X POST http://localhost:3333/mcp \
   -H "Content-Type: application/json" \
-  -d '{"name": "read_file", "arguments": {"path": "hello.txt"}}' | jq
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "read_file",
+      "arguments": {"path": "hello.txt"}
+    }
+  }' | jq
 ```
 
-**Challenge**: Try calling the database tool to list all users!
+**Challenge**: Try calling the database tool to list all tables!
 
 <details>
 <summary>Solution</summary>
 
 ```bash
-curl -X POST http://localhost:3334/call \
+curl -X POST http://localhost:3334/mcp \
   -H "Content-Type: application/json" \
-  -d '{"name": "query_db", "arguments": {"sql": "SELECT * FROM users;"}}' | jq
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "list_tables",
+      "arguments": {}
+    }
+  }' | jq
 ```
 </details>
 
@@ -218,78 +239,43 @@ cd mcp-calculator
 #### Step 2: Create `server.py`
 
 ```python
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastmcp import FastMCP
 
-app = FastAPI()
+# Initialize the MCP server
+mcp = FastMCP("Calculator Server")
 
-class CallRequest(BaseModel):
-    name: str
-    arguments: dict
-
-@app.get("/tools")
-async def list_tools():
-    return [
-        {
-            "name": "calculate",
-            "description": "Perform basic math operations (add, subtract, multiply, divide)",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "operation": {
-                        "type": "string",
-                        "enum": ["add", "subtract", "multiply", "divide"],
-                        "description": "Math operation to perform"
-                    },
-                    "a": {
-                        "type": "number",
-                        "description": "First number"
-                    },
-                    "b": {
-                        "type": "number",
-                        "description": "Second number"
-                    }
-                },
-                "required": ["operation", "a", "b"]
-            }
-        }
-    ]
-
-@app.post("/call")
-async def call_tool(request: CallRequest):
-    if request.name != "calculate":
-        raise HTTPException(status_code=404, detail="Tool not found")
-
-    operation = request.arguments.get("operation")
-    a = float(request.arguments.get("a"))
-    b = float(request.arguments.get("b"))
-
+@mcp.tool()
+def calculate(operation: str, a: float, b: float) -> float:
+    """
+    Perform basic math operations (add, subtract, multiply, divide).
+    
+    Args:
+        operation: One of 'add', 'subtract', 'multiply', 'divide'
+        a: First number
+        b: Second number
+    """
     if operation == "add":
-        result = a + b
+        return a + b
     elif operation == "subtract":
-        result = a - b
+        return a - b
     elif operation == "multiply":
-        result = a * b
+        return a * b
     elif operation == "divide":
         if b == 0:
-            raise HTTPException(status_code=400, detail="Cannot divide by zero")
-        result = a / b
+            raise ValueError("Cannot divide by zero")
+        return a / b
     else:
-        raise HTTPException(status_code=400, detail="Invalid operation")
-
-    return {"result": result}
+        raise ValueError(f"Invalid operation: {operation}")
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=3335)
+    # Run with HTTP transport on port 3335
+    mcp.run(transport="http", host="0.0.0.0", port=3335)
 ```
 
 #### Step 3: Create `requirements.txt`
 
 ```txt
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.5.0
+fastmcp>=2.0.0
 ```
 
 #### Step 4: Create `Dockerfile`
@@ -318,17 +304,13 @@ Add this service to the root `docker-compose.yml`:
 
 #### Step 6: Register in Agent
 
-Edit `client/lib/config.py`, in the `__init__` method:
+Edit `client/lib/config.py`, in the `__init__` method of `AppConfig`:
 
 ```python
 self.mcp_calculator_url = os.environ.get("MCP_CALCULATOR_URL", "http://mcp-calculator:3335")
 
-# In server_map
-self.server_map = {
-    "read_file": self.mcp_file_url,
-    "query_db": self.mcp_db_url,
-    "calculate": self.mcp_calculator_url  # Add this line
-}
+# In server_map registration
+self.server_map["calculate"] = self.mcp_calculator_url
 ```
 
 #### Step 7: Test It!
@@ -482,15 +464,19 @@ and summarize the content."
 ```python
 import os
 import requests
-from fastapi import FastAPI, HTTPException
+from fastmcp import FastMCP
 
-app = FastAPI()
+mcp = FastMCP("Weather Server")
 API_KEY = os.environ.get("OPENWEATHER_API_KEY", "")
 
-@app.post("/call")
-async def call_tool(request: dict):
-    city = request["arguments"]["city"]
-
+@mcp.tool()
+def get_weather(city: str) -> dict:
+    """
+    Get current weather for a city.
+    
+    Args:
+        city: Name of the city (e.g., 'London', 'Rome')
+    """
     url = f"http://api.openweathermap.org/data/2.5/weather"
     params = {"q": city, "appid": API_KEY, "units": "metric"}
 
@@ -506,7 +492,10 @@ async def call_tool(request: dict):
             "humidity": data["main"]["humidity"]
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise ValueError(f"Weather API error: {str(e)}")
+
+if __name__ == "__main__":
+    mcp.run(transport="http", host="0.0.0.0", port=3335)
 ```
 </details>
 
