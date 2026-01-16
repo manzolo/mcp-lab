@@ -86,10 +86,11 @@ def clean_json_text(text: str) -> str:
     if text.endswith(r'\"}}'):
         text = text[:-4] + '"}}'
 
-    # Fix 4: Fix commonly missing colons after parameter keys
+    # Fix 4: Fix commonly missing colons or malformed keys
     # Pattern: "parameters" {"sql": ...} → "parameters": {"sql": ...}
-    # This happens when the LLM forgets the colon in JSON structure
-    text = re.sub(r'("parameters"|"arguments")\s*(\{)', r'\1: \2', text)
+    # Pattern: parameters={"sql": ...} → "parameters": {"sql": ...}
+    # Pattern: "parameters"={"sql": ...} → "parameters": {"sql": ...}
+    text = re.sub(r'\"?(parameters|arguments)\"?\s*[:=]?\s*(\{)', r'"\1": \2', text)
 
     return text
 

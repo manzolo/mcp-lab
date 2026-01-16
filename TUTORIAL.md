@@ -6,12 +6,13 @@ Welcome to the extended learning guide for MCP Lab! This tutorial provides hands
 
 1. [Introduction to AI Agents](#introduction-to-ai-agents)
 2. [Understanding the Agent Loop](#understanding-the-agent-loop)
-3. [MCP Protocol Deep Dive](#mcp-protocol-deep-dive)
-4. [Reading and Modifying Code](#reading-and-modifying-code)
-5. [Building Your First Tool](#building-your-first-tool)
-6. [Advanced Patterns](#advanced-patterns)
-7. [Debugging Techniques](#debugging-techniques)
-8. [Challenges and Exercises](#challenges-and-exercises)
+3. [Using the Web Interface](#using-the-web-interface)
+4. [MCP Protocol Deep Dive](#mcp-protocol-deep-dive)
+5. [Reading and Modifying Code](#reading-and-modifying-code)
+6. [Building Your First Tool](#building-your-first-tool)
+7. [Advanced Patterns](#advanced-patterns)
+8. [Debugging Techniques](#debugging-techniques)
+9. [Challenges and Exercises](#challenges-and-exercises)
 
 ---
 
@@ -84,6 +85,50 @@ Alice wrote the note about groceries.
 2. How long did Ollama take to respond?
 3. What SQL query did the LLM generate?
 4. How many round trips to Ollama occurred? (Hint: Steps 2 and 5)
+
+---
+
+## Using the Web Interface
+
+MCP Lab includes a Streamlit-based web interface that makes it easier to visualize the agent loop in action.
+
+### Exercise 1.5: Explore with the GUI
+
+**Goal**: Use the web interface to see the agent loop visually.
+
+**Steps**:
+
+1. Start the services and GUI:
+   ```bash
+   # If using external Ollama
+   make up && make gui
+
+   # Or with local Ollama
+   make up-local && make gui
+   ```
+
+2. Open http://localhost:8501 in your browser
+
+3. Try these queries:
+   - "Read hello.txt"
+   - "Who wrote the groceries note?"
+   - "List all users in the database"
+
+**What to observe**:
+
+- **Progress indicator**: Watch as the agent moves through each step
+- **Step labels**: See Discovery, Reasoning, Decision, Execution, Synthesis in real-time
+- **Tool calls**: See which tools are called and with what arguments
+- **Results**: See the raw results from each tool
+- **History**: Click "View Agent Loop Details" on past messages to review what happened
+
+**Learning Point**:
+
+The GUI uses the same `MCPAgent` class as the CLI, but instead of printing to terminal,
+it consumes events from a generator. This pattern (separating logic from presentation)
+is called **separation of concerns** and makes code more flexible.
+
+Check `client/gui.py` to see how the Streamlit UI consumes events from `MCPAgent.run()`.
 
 ---
 

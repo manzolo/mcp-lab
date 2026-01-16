@@ -91,6 +91,16 @@ make agent-file
 make agent-db
 ```
 
+### Web Interface (GUI)
+
+```bash
+# Start the Streamlit web interface
+make gui
+
+# Then open http://localhost:8501 in your browser
+# Note: Requires MCP servers running (make up or make up-local first)
+```
+
 ### Development
 
 ```bash
@@ -106,11 +116,35 @@ make build
 
 ## Key Files and Responsibilities
 
-### `client/agent.py` (~200 lines, was 348)
-The main orchestrator that ties everything together. Clean, high-level code that delegates to modules:
-- `chat()`: Main function implementing the 5-step agent loop
-- Minimal logic - just orchestration and error handling
-- **Educational note**: Compare with git history to see before/after refactoring
+### `client/agent.py` (~400 lines)
+The main orchestrator that ties everything together. Provides two interfaces:
+
+**CLI Interface** (`chat()` function):
+- Main function implementing the 5-step agent loop with terminal output
+- Uses `lib/ui.py` for colored console output
+- Entry point when running `python agent.py "prompt"`
+
+**Programmatic Interface** (`MCPAgent` class):
+- Generator-based interface for GUIs and programmatic use
+- `MCPAgent.run(prompt)` yields `AgentEvent` objects
+- Event types: `STEP_START`, `INFO`, `SUCCESS`, `TOOL_CALL`, `TOOL_RESULT`, `FINAL_ANSWER`, `ERROR`
+- Enables real-time UI updates as agent progresses
+
+**Key Types**:
+- `EventType` (Enum): Types of events the agent can emit
+- `AgentEvent` (dataclass): Structured event with `type`, `step`, `message`, `data`
+
+**Educational note**: The dual-interface design demonstrates separation of concerns - business logic (MCPAgent) is decoupled from presentation (chat() for CLI, gui.py for web)
+
+### `client/gui.py` (~270 lines)
+Streamlit-based web interface for visual interaction with the agent:
+- Consumes events from `MCPAgent.run()` generator
+- Real-time display of agent loop steps
+- Chat history with expandable details
+- Tool call and result visualization
+- Session state management for conversation persistence
+
+**Usage**: `make gui` or `streamlit run gui.py`
 
 ### `client/setup_wizard.py` (~300 lines)
 Interactive setup wizard for beginner-friendly configuration:
@@ -213,6 +247,8 @@ Configuration is managed via `.env` file (created from `.env.dist`):
 - **agent**: Includes the agent container
 - **test**: Includes the test-runner container
 - **local-llm**: Includes Ollama container for self-contained setup
+- **gui**: Includes the Streamlit web interface (port 8501)
+- **wizard**: Includes the interactive setup wizard
 
 ## Adding New MCP Tools
 
@@ -271,9 +307,10 @@ The agent includes a detailed system prompt (`client/agent.py:174-184`) that ins
 ```
 mcp-lab/
 ├── client/                    # The Agent
-│   ├── agent.py              # Main orchestrator (~200 lines, was 348)
+│   ├── agent.py              # Main orchestrator + MCPAgent class (~400 lines)
+│   ├── gui.py                # Streamlit web interface (~270 lines)
 │   ├── setup_wizard.py       # Interactive setup (~300 lines)
-│   ├── requirements.txt      # Pinned dependencies
+│   ├── requirements.txt      # Pinned dependencies (includes streamlit)
 │   └── lib/                  # Modular components (7 modules, ~1700 lines total)
 │       ├── __init__.py
 │       ├── config.py         # Configuration (160 lines)
@@ -317,10 +354,11 @@ mcp-lab/
 - Mixed concerns
 
 **After Refactoring**:
-- agent.py: ~200 lines (orchestration only)
-- 7 focused modules (~1700 lines with extensive docs)
+- agent.py: ~400 lines (orchestration + MCPAgent class with dual interfaces)
+- gui.py: ~270 lines (Streamlit web interface)
+- 7 focused modules in lib/ (~1700 lines with extensive docs)
 - ~1500 lines of educational docstrings
-- Clear separation of concerns
+- Clear separation of concerns (CLI vs programmatic interface)
 - Each module < 300 lines
 
 ## Network Architecture
@@ -330,6 +368,9 @@ All services communicate via the `mcp-net` Docker bridge network. Internal servi
 - DB server: `http://mcp-db:3334`
 - PostgreSQL: `postgres:5432`
 - Ollama (when using local-llm): `http://ollama:11434`
+- GUI (when using gui profile): `http://localhost:8501` (exposed to host)
+
+**Linux Note**: The GUI uses `extra_hosts: host.docker.internal:host-gateway` for accessing host Ollama on Linux.
 
 ## Development Workflow
 
@@ -364,6 +405,14 @@ All services communicate via the `mcp-net` Docker bridge network. Internal servi
 **Modify UI colors/styling**:
 - File: `client/lib/ui.py`
 - Update `Colors` class or print functions
+
+**Modify web interface**:
+- File: `client/gui.py`
+- Uses Streamlit components and `MCPAgent` class
+
+**Add new event types to agent**:
+- File: `client/agent.py`
+- Add to `EventType` enum and yield from `MCPAgent.run()`
 
 ## CI/CD Pipeline
 

@@ -7,7 +7,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Copy application code
-COPY agent.py .
+COPY agent.py gui.py ./
 COPY lib/ ./lib/
 
 ENTRYPOINT ["python", "agent.py"]

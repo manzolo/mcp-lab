@@ -19,6 +19,11 @@ The Agent Loop (5 Steps):
 Each step is handled by a specialized module, keeping this file
 clean and easy to understand.
 
+Architecture Note:
+    This module provides two interfaces:
+    - MCPAgent class: A generator-based interface for GUIs and programmatic use
+    - chat() function: The original CLI interface with rich terminal output
+
 Learning Points:
 - Orchestration code should be high-level and readable
 - Details are hidden in modules (separation of concerns)
@@ -26,14 +31,22 @@ Learning Points:
 - Good orchestration makes the system easy to understand and modify
 
 Usage:
+    # CLI usage
     python agent.py "Your question here"
+
+    # Programmatic usage (for GUIs)
+    agent = MCPAgent()
+    for event in agent.run("Your question"):
+        print(event)
 
 Example:
     python agent.py "Read hello.txt and tell me what it says"
 """
 
 import sys
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Generator
+from dataclasses import dataclass
+from enum import Enum
 
 # Import our modules
 from lib.config import get_config
@@ -47,9 +60,205 @@ from lib.errors import (
 )
 
 
+# =============================================================================
+# Event Types for the MCPAgent Generator Interface
+# =============================================================================
+
+class EventType(Enum):
+    """Types of events yielded by MCPAgent.run()"""
+    STEP_START = "step_start"      # A step is beginning
+    INFO = "info"                   # Informational message
+    SUCCESS = "success"             # Something succeeded
+    TOOL_CALL = "tool_call"        # A tool is being called
+    TOOL_RESULT = "tool_result"    # A tool returned a result
+    FINAL_ANSWER = "final_answer"  # The final answer
+    ERROR = "error"                 # An error occurred
+
+
+@dataclass
+class AgentEvent:
+    """
+    Event yielded by MCPAgent during execution.
+
+    This provides a structured way for GUIs to receive updates
+    about the agent's progress through the loop.
+
+    Attributes:
+        type: The type of event (see EventType enum)
+        step: Which step of the agent loop (1-6, or 0 for errors)
+        message: Human-readable description
+        data: Optional additional data (tool calls, results, etc.)
+    """
+    type: EventType
+    step: int
+    message: str
+    data: Any = None
+
+
+# =============================================================================
+# MCPAgent Class - Generator-based Interface for GUIs
+# =============================================================================
+
+class MCPAgent:
+    """
+    MCP Agent with a generator-based interface.
+
+    This class wraps the agent loop in a generator that yields events,
+    making it easy to integrate with GUIs like Streamlit or web frontends.
+
+    Example:
+        agent = MCPAgent()
+        for event in agent.run("Who wrote the groceries note?"):
+            if event.type == EventType.STEP_START:
+                print(f"Starting step {event.step}: {event.message}")
+            elif event.type == EventType.FINAL_ANSWER:
+                print(f"Answer: {event.message}")
+
+    Learning Point:
+        Using a generator pattern allows the UI to update in real-time
+        as the agent progresses, rather than waiting for the entire
+        operation to complete.
+    """
+
+    def __init__(self):
+        """Initialize the agent with configuration."""
+        self.config = get_config()
+        self.llm_client = LLMClient()
+        self.tools = []
+        self.server_map = {}
+
+    def run(self, prompt: str) -> Generator[AgentEvent, None, None]:
+        """
+        Run the agent loop, yielding events for each step.
+
+        Args:
+            prompt: The user's question or request
+
+        Yields:
+            AgentEvent objects describing the agent's progress
+
+        Learning Point:
+            This generator implements the same 5-step loop as chat(),
+            but yields events instead of printing directly. This
+            separation of concerns allows any UI to consume these events.
+        """
+        try:
+            # =================================================================
+            # STEP 1: DISCOVERY & CONTEXT PREPARATION
+            # =================================================================
+            yield AgentEvent(EventType.STEP_START, 1, "Discovery & Assembly")
+
+            self.tools, self.server_map = discover_all_tools()
+
+            if not self.tools:
+                yield AgentEvent(EventType.ERROR, 1,
+                    "No tools available! Make sure MCP servers are running.")
+                return
+
+            yield AgentEvent(EventType.SUCCESS, 1,
+                f"Loaded {len(self.tools)} tools",
+                data={"tool_count": len(self.tools)})
+
+            # =================================================================
+            # STEP 2: REASONING (The "Brain")
+            # =================================================================
+            yield AgentEvent(EventType.STEP_START, 2, "Reasoning")
+            yield AgentEvent(EventType.INFO, 2,
+                f"Sending to {self.config.model_name}...")
+
+            messages = self.llm_client.create_conversation(prompt)
+
+            try:
+                response_data = self.llm_client.chat(messages, self.tools)
+            except ConnectionError as e:
+                raise LLMConnectionError(self.llm_client.ollama_url, str(e))
+
+            message = response_data.get("message", {})
+            yield AgentEvent(EventType.SUCCESS, 2, "LLM responded")
+
+            # =================================================================
+            # STEP 3: DECISION EVALUATION
+            # =================================================================
+            yield AgentEvent(EventType.STEP_START, 3, "Decision Evaluation")
+
+            tool_calls, is_direct_answer = self.llm_client.parse_tool_calls(message)
+
+            if tool_calls:
+                yield AgentEvent(EventType.INFO, 3,
+                    f"LLM decided to use {len(tool_calls)} tool(s)",
+                    data={"tool_calls": tool_calls})
+
+                # =============================================================
+                # STEP 4: EXECUTION LOOP
+                # =============================================================
+                yield AgentEvent(EventType.STEP_START, 4, "Tool Execution")
+
+                router = ToolRouter(self.server_map, timeout=10)
+
+                # Yield info about each tool call
+                for tc in tool_calls:
+                    tool_name = tc.get("function", {}).get("name", "unknown")
+                    tool_args = tc.get("function", {}).get("arguments", {})
+                    yield AgentEvent(EventType.TOOL_CALL, 4,
+                        f"Calling {tool_name}",
+                        data={"name": tool_name, "arguments": tool_args})
+
+                try:
+                    results = router.execute_tools(tool_calls)
+                except ConnectionError as e:
+                    raise MCPServerError("MCP Server", "unknown", str(e))
+                except Exception as e:
+                    raise ToolExecutionError("unknown", str(e))
+
+                # Yield results
+                for result in results:
+                    yield AgentEvent(EventType.TOOL_RESULT, 4,
+                        f"Got result from {result.get('tool', 'unknown')}",
+                        data=result)
+
+                tool_result_messages = router.format_tool_results_for_llm(results)
+
+                # =============================================================
+                # STEP 5: SYNTHESIS
+                # =============================================================
+                yield AgentEvent(EventType.STEP_START, 5, "Synthesis")
+                yield AgentEvent(EventType.INFO, 5,
+                    "Sending tool outputs back to LLM...")
+
+                messages = self.llm_client.add_tool_results(
+                    messages, message, tool_result_messages
+                )
+
+                try:
+                    final_data = self.llm_client.chat(messages, self.tools)
+                except ConnectionError as e:
+                    raise LLMConnectionError(self.llm_client.ollama_url, str(e))
+
+                final_content = final_data["message"]["content"]
+
+                # =============================================================
+                # STEP 6: FINAL ANSWER
+                # =============================================================
+                yield AgentEvent(EventType.FINAL_ANSWER, 6, final_content)
+
+            else:
+                # LLM answered directly without tools
+                yield AgentEvent(EventType.INFO, 3, "LLM answered directly (no tools needed)")
+                yield AgentEvent(EventType.FINAL_ANSWER, 6, message.get("content", ""))
+
+        except MCPError as e:
+            yield AgentEvent(EventType.ERROR, 0, str(e))
+        except Exception as e:
+            yield AgentEvent(EventType.ERROR, 0, handle_error(e))
+
+
+# =============================================================================
+# CLI Interface - The Original chat() Function
+# =============================================================================
+
 def chat(prompt: str):
     """
-    Main agent function - orchestrates the agent loop.
+    Main agent function - orchestrates the agent loop with CLI output.
 
     This is the heart of the agent. It implements the 5-step loop:
     Discovery → Reasoning → Decision → Execution → Synthesis
@@ -182,21 +391,10 @@ def chat(prompt: str):
 
 
 if __name__ == "__main__":
-    """
-    Entry point when running the script directly.
+    if len(sys.argv) < 2:
+        print("Usage: python agent.py 'Your question here'")
+        print("Example: python agent.py 'Read hello.txt and tell me what it says'")
+        sys.exit(1)
 
-    Parses command line arguments and starts the agent.
-
-    Usage:
-        python agent.py "Your prompt here"
-        python agent.py  # Uses default prompt
-    """
-    if len(sys.argv) > 1:
-        # User provided a prompt
-        prompt = " ".join(sys.argv[1:])
-    else:
-        # Default didactic prompt
-        prompt = "Hello! Check the database for any notes and tell me what they are about."
-
-    # Run the agent!
+    prompt = sys.argv[1]
     chat(prompt)

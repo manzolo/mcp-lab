@@ -1,4 +1,4 @@
-.PHONY: up down build logs test clean setup wizard agent help
+.PHONY: up down build logs test clean setup wizard agent gui help
 
 # Show help
 help:
@@ -20,6 +20,7 @@ help:
 	@echo "  make agent MSG='your prompt' - Run agent with custom prompt"
 	@echo "  make agent-file  - Run agent with file test"
 	@echo "  make agent-db    - Run agent with database test"
+	@echo "  make gui         - Start web-based chat interface (Streamlit)"
 	@echo ""
 	@echo "Management:"
 	@echo "  make logs        - View service logs"
@@ -62,7 +63,7 @@ down:
 
 # Build images
 build:
-	docker compose --profile agent --profile test --profile wizard build --no-cache
+	docker compose --profile agent --profile test --profile wizard --profile gui build --no-cache
 
 # Follow logs
 logs:
@@ -77,7 +78,6 @@ test-servers:
 
 # Run only File Server tests
 test-file:
-	docker compose run --rm test-runner python test_mcp.py file
 	docker compose run --rm test-runner python test_mcp.py file
 
 # Run only DB Server tests
@@ -99,6 +99,15 @@ agent-file:
 # Run Agent with DB Test Query
 agent-db:
 	docker compose run --rm mcp-agent "List all notes in the database and tell me who wrote them"
+
+# Run Web Chat Interface (Streamlit)
+gui:
+	docker compose --profile gui up -d mcp-gui
+	@echo ""
+	@echo "🌐 GUI is starting at http://localhost:8501"
+	@echo ""
+	@echo "Note: Make sure Ollama is running (either 'make up-local' or external)"
+	@echo "Use 'make logs' to monitor or 'make down' to stop."
 
 # Remove volumes and orphans
 clean:

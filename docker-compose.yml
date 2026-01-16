@@ -79,6 +79,29 @@ services:
     profiles:
       - local-llm
 
+  # Web Chat Interface (Streamlit)
+  mcp-gui:
+    build: ./client
+    container_name: mcp-gui
+    ports:
+      - "8501:8501"
+    environment:
+      - OLLAMA_URL=${OLLAMA_URL:-http://host.docker.internal:11434}
+      - MODEL_NAME=${MODEL_NAME:-llama3.2:3b}
+      - MCP_FILE_URL=http://mcp-file:3333
+      - MCP_DB_URL=http://mcp-db:3334
+    depends_on:
+      - mcp-file
+      - mcp-db
+    networks:
+      - mcp-net
+    # Enable host.docker.internal on Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["streamlit", "run", "gui.py", "--server.address", "0.0.0.0"]
+    profiles:
+      - gui
+
   wizard:
     build:
       context: ./client

@@ -249,6 +249,34 @@ make agent MSG="Read hello.txt and check if any notes mention that word"
 
 ---
 
+## Web Interface (GUI)
+
+For a visual, interactive experience, MCP Lab includes a Streamlit-based web interface:
+
+```bash
+# Start the web interface
+make gui
+```
+
+Then open http://localhost:8501 in your browser.
+
+**Features:**
+- Chat-style interface for interacting with the agent
+- Real-time display of the agent loop steps
+- Visual indicators for tool calls and results
+- Expandable details for each response
+
+**Note:** Make sure your MCP servers and Ollama are running before starting the GUI:
+```bash
+# With external Ollama
+make up && make gui
+
+# Or with local Ollama
+make up-local && make gui
+```
+
+---
+
 ## Configuration
 
 ### Environment Variables
@@ -284,6 +312,7 @@ POSTGRES_PASSWORD=mcp
 mcp-lab/
 ├── client/                    # The Agent
 │   ├── agent.py              # Main orchestrator (~200 lines)
+│   ├── gui.py                # Streamlit web interface
 │   ├── setup_wizard.py       # Interactive setup
 │   ├── requirements.txt      # Python dependencies
 │   └── lib/                  # Modular components
@@ -494,6 +523,9 @@ make test-servers    # Test servers only
 make agent MSG='...' # Custom prompt
 make agent-file      # Test file reading
 make agent-db        # Test database query
+
+# Web Interface
+make gui             # Start Streamlit chat UI at http://localhost:8501
 
 # Management
 make logs            # View logs
